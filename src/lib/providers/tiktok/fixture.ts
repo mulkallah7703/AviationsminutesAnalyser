@@ -1,0 +1,41 @@
+import type { TikTokAccount } from "@/lib/providers/tiktok/api";
+
+export const tiktokPreviewAccount: TikTokAccount = {
+  openId: "preview-open-id",
+  displayName: "ديوان للتجربة",
+  username: "diwan.preview",
+  avatarUrl: null,
+  bio: "معاينة محلية لصفحة TikTok قبل ربط حساب حقيقي.",
+  profileUrl: "https://www.tiktok.com/@diwan.preview",
+  verified: false,
+  followerCount: 12840,
+  followingCount: 86,
+  likesCount: 240331,
+  videoCount: 42,
+  videos: [
+    {
+      id: "preview-1",
+      title: "جولة في المطبخ",
+      description: "مقطع تجريبي",
+      coverUrl: null,
+      shareUrl: "https://www.tiktok.com/@diwan.preview/video/1",
+      viewCount: 90210,
+      likeCount: 6400,
+      commentCount: 210,
+      shareCount: 88,
+      createTime: "2026-09-28T10:00:00.000Z",
+    },
+    {
+      id: "preview-2",
+      title: "وصفة سريعة",
+      description: "مقطع تجريبي",
+      coverUrl: null,
+      shareUrl: "https://www.tiktok.com/@diwan.preview/video/2",
+      viewCount: 15420,
+      likeCount: 980,
+      commentCount: 44,
+      shareCount: 19,
+      createTime: "2026-09-12T15:30:00.000Z",
+    },
+  ],
+};
