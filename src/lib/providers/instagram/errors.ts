@@ -9,8 +9,8 @@ const APPS = {
 };
 
 const LOGIN_GUIDE = {
-  href: "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login",
-  labelAr: "دليل Business Login for Instagram",
+  href: "https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/get-started",
+  labelAr: "دليل Instagram API with Unified Login",
 };
 
 const PROFESSIONAL = {
@@ -31,9 +31,9 @@ export function explainInstagramCode(code: string, description = "", redirectUri
   if (blob.includes("invalid platform app") || code === "invalid_client") {
     return {
       code: "invalid_client",
-      titleAr: "معرّف تطبيق Instagram أو سرّه مرفوض",
+      titleAr: "Meta رفضت التطبيق في مسار Instagram login",
       bodyAr:
-        "Meta أعادت «Invalid platform app». استخدم Instagram App ID و Instagram App Secret من Instagram > API setup with Instagram login > Business login settings، لا معرّف تطبيق Facebook. القيمة القادمة من متغير البيئة تتقدّم على المحفوظة.",
+        "Meta أعادت «Invalid platform app». التطبيقات الجديدة تعمل بـ Unified login فقط: أضف Configuration ID (config_id) من API setup with Unified login في الإعدادات أو INSTAGRAM_CONFIG_ID، مع معرّف تطبيق Meta وسرّه، وتأكد أن السر يطابق المعرّف. القيمة القادمة من متغير البيئة تتقدّم على المحفوظة.",
       links: [APPS, LOGIN_GUIDE],
     };
   }
@@ -42,7 +42,7 @@ export function explainInstagramCode(code: string, description = "", redirectUri
       code: "redirect_uri_mismatch",
       titleAr: "عنوان العودة غير مطابق",
       bodyAr: redirectUri
-        ? `الصق هذا العنوان كما هو في OAuth redirect URIs داخل Business login settings: ${redirectUri}`
+        ? `الصق هذا العنوان كما هو في Redirect URL داخل API setup with Unified login (أو Valid OAuth Redirect URIs): ${redirectUri}`
         : "عنوان إعادة التوجيه لا يطابق ما سُجّل في تطبيق Meta.",
       links: [APPS],
     };
@@ -52,7 +52,7 @@ export function explainInstagramCode(code: string, description = "", redirectUri
       code: "tester_required",
       titleAr: "الحساب ليس ضمن مختبري التطبيق",
       bodyAr:
-        "قبل مراجعة Meta لا يربط إلا حساب له دور في التطبيق. أضف الحساب في App roles > Roles كـ Instagram Tester، واقبل الدعوة من إعدادات Instagram > Apps and websites، ثم أعد الربط.",
+        "قبل مراجعة Meta لا يربط إلا حساب له دور في التطبيق. من API setup with Unified login > Generate access tokens > Add account ادعُ الحساب كـ Instagram Tester، واقبل الدعوة من Instagram على الويب: Settings > Website permissions > Apps and websites > Tester Invites، ثم أعد الربط.",
       links: [APPS],
     };
   }
@@ -73,7 +73,7 @@ export function explainInstagramCode(code: string, description = "", redirectUri
       return {
         code,
         titleAr: "Instagram غير مفعّل",
-        bodyAr: "المسؤول لم يحفظ Instagram App ID و Instagram App Secret بعد. البطاقة تبقى «غير مفعّل» حتى يُحفظا.",
+        bodyAr: "المسؤول لم يحفظ معرّف تطبيق Meta وسرّه بعد (ومعه Configuration ID للتطبيقات الجديدة). البطاقة تبقى «غير مفعّل» حتى يُحفظا.",
       };
     case "not_connected":
       return {
@@ -113,11 +113,19 @@ export function explainInstagramCode(code: string, description = "", redirectUri
         code,
         titleAr: "صلاحية غير ممنوحة",
         bodyAr:
-          "الربط لا يملك صلاحية القراءة المطلوبة. اقطع الربط ثم اربطه ووافق على instagram_business_basic و instagram_business_manage_insights.",
+          "الربط لا يملك صلاحية القراءة المطلوبة. أضف instagram_basic و instagram_manage_insights إلى إعداد config_id (أو instagram_business_basic و instagram_business_manage_insights في الإعداد القديم)، ثم اقطع الربط واربطه من جديد.",
         links: [APPS],
       };
     case "not_professional":
       return notProfessional();
+    case "no_instagram_account":
+      return {
+        code,
+        titleAr: "لم يُشارَك حساب Instagram",
+        bodyAr:
+          "اكتمل الدخول لكن Meta لم تُعد أي حساب Instagram مشارك مع التطبيق. أعد الربط واختر الـ business portfolio وحساب Instagram الاحترافي في نافذة Meta، وتأكد أن إعداد config_id يطلب الأصل Instagram account.",
+        links: [APPS],
+      };
     default:
       return {
         code: code || "unknown",

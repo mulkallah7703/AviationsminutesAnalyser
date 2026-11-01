@@ -60,7 +60,17 @@ export function prepareInstagramCredentials(
 ): { ok: true; fields: Record<string, string> } | { ok: false; message: string } {
   const clientId = fields.clientId?.trim() ?? "";
   if (clientId && !/^\d{6,25}$/.test(clientId)) {
-    return { ok: false, message: "Instagram App ID أرقام فقط، كما يظهر في Business login settings." };
+    return { ok: false, message: "معرّف التطبيق أرقام فقط، كما يظهر في App settings > Basic." };
+  }
+  const configId = fields.configId?.trim() ?? "";
+  if (configId && !/^\d{6,25}$/.test(configId)) {
+    return { ok: false, message: "Configuration ID أرقام فقط، كما يظهر في API setup with Unified login." };
+  }
+  if (!configId) {
+    fields = { ...fields };
+    delete fields.configId;
+  } else {
+    fields = { ...fields, configId };
   }
   const publicBaseUrl = fields.publicBaseUrl?.trim() ?? "";
   if (!publicBaseUrl) {

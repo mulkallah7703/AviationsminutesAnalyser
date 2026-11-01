@@ -1,11 +1,25 @@
 import type { ProviderMeta } from "@/lib/providers/types";
 
-/** Business Login for Instagram (Instagram API with Instagram Login). */
+/**
+ * Two Meta setups are supported:
+ * - Unified login (newer apps): Facebook Login for Business with a `config_id`, Meta app ID and secret,
+ *   API at graph.facebook.com. Used when a configuration ID is set.
+ * - Instagram login (older apps): Business Login for Instagram with scopes, Instagram app ID and secret,
+ *   API at graph.instagram.com.
+ */
 export const INSTAGRAM_SCOPES = ["instagram_business_basic", "instagram_business_manage_insights"] as const;
 
 export const INSTAGRAM_SCOPE = INSTAGRAM_SCOPES.join(",");
 
 export const INSTAGRAM_INSIGHTS_SCOPE = "instagram_business_manage_insights";
+
+/** Unified login permissions the configuration must include for this dashboard. */
+export const UNIFIED_REQUIRED_SCOPES = ["instagram_basic", "instagram_manage_insights"] as const;
+
+export const UNIFIED_INSIGHTS_SCOPE = "instagram_manage_insights";
+
+/** Stored as TokenSet.tokenType so a token keeps the setup it was issued for. */
+export const UNIFIED_TOKEN_TYPE = "unified_suat";
 
 export const INSTAGRAM_CALLBACK_PATH = "/api/auth/instagram/callback";
 
@@ -13,6 +27,8 @@ export const INSTAGRAM_CALLBACK_PATH = "/api/auth/instagram/callback";
 export const INSTAGRAM_API_VERSION = "v26.0";
 
 export const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${INSTAGRAM_API_VERSION}`;
+
+export const FACEBOOK_GRAPH_BASE = `https://graph.facebook.com/${INSTAGRAM_API_VERSION}`;
 
 export const instagramMeta: ProviderMeta = {
   id: "instagram",
@@ -24,8 +40,8 @@ export const instagramMeta: ProviderMeta = {
   consoleLinkLabel: "تطبيقات Meta",
   extraLinks: [
     {
-      href: "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login",
-      labelAr: "دليل Business Login for Instagram",
+      href: "https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/get-started",
+      labelAr: "دليل Instagram API with Unified Login",
     },
     {
       href: "https://developers.facebook.com/docs/instagram-platform/api-reference/instagram-user/insights",
@@ -35,20 +51,31 @@ export const instagramMeta: ProviderMeta = {
   credentialFields: [
     {
       key: "clientId",
-      label: "Instagram App ID",
-      labelAr: "معرّف تطبيق Instagram",
+      label: "Meta App ID",
+      labelAr: "معرّف تطبيق Meta",
       helpAr:
-        "Instagram App ID من Instagram > API setup with Instagram login > Business login settings. ليس معرّف تطبيق Facebook الظاهر أعلى اللوحة. بعد الحفظ يُعرض آخر أربعة أحرف فقط.",
+        "مع Unified login: معرّف تطبيق Meta من App settings > Basic. مع الإعداد القديم Instagram login: Instagram App ID من Business login settings. بعد الحفظ يُعرض آخر أربعة أحرف فقط.",
       secret: false,
       placeholder: "1234567890123456",
     },
     {
       key: "clientSecret",
-      label: "Instagram App Secret",
-      labelAr: "سر تطبيق Instagram",
-      helpAr: "Instagram App Secret من الصفحة نفسها. يُحفظ مشفّراً ولا يُعرض بعد الحفظ. اتركه فارغاً للإبقاء على السر المحفوظ.",
+      label: "Meta App Secret",
+      labelAr: "سر تطبيق Meta",
+      helpAr: "سر التطبيق المقابل للمعرّف أعلاه. يُحفظ مشفّراً ولا يُعرض بعد الحفظ. اتركه فارغاً للإبقاء على السر المحفوظ.",
       secret: true,
       placeholder: "••••••••",
+    },
+    {
+      key: "configId",
+      label: "Configuration ID (config_id)",
+      labelAr: "معرّف الإعداد config_id",
+      helpAr:
+        "مطلوب للتطبيقات الجديدة (Unified login). من Use cases > Manage messaging & content on Instagram > Customize > API setup with Unified login، أو من Facebook Login for Business > Configurations. ليس سراً. اتركه فارغاً فقط مع إعداد Instagram login القديم.",
+      secret: false,
+      optional: true,
+      reveal: true,
+      placeholder: "1234567890123456",
     },
     {
       key: "publicBaseUrl",
@@ -64,39 +91,52 @@ export const instagramMeta: ProviderMeta = {
   ],
   setupSteps: [
     {
-      titleAr: "أضف منتج Instagram",
+      titleAr: "افتح API setup with Unified login",
       bodyAr:
-        "من developers.facebook.com/apps افتح التطبيق وأضف منتج Instagram، ثم اختر API setup with Instagram login. هذا المسار لا يحتاج صفحة Facebook.",
+        "من developers.facebook.com/apps افتح التطبيق، ثم Use cases > Manage messaging & content on Instagram > Customize > API setup with Unified login. يجب أن يملك التطبيقَ business portfolio حتى يظهر التبويب.",
     },
     {
-      titleAr: "اضبط Business login",
+      titleAr: "أضف صلاحية الإحصاءات إلى الإعداد",
       bodyAr:
-        "في Set up Instagram business login > Business login settings الصق عنوان العودة الظاهر أدناه في OAuth redirect URIs. Meta يطابقه حرفياً، وقد يضيف شرطة مائلة في النهاية فراجعها.",
+        "في Configure your app افتح معاينة الإعداد واختر Edit permissions، وتأكد من instagram_basic و instagram_manage_insights (بدونها لا مشاهدات ولا وصول ولا متابعين جدد). الأصل Instagram account مطلوب. ثم Use this configuration.",
+    },
+    {
+      titleAr: "عنوان العودة ومعرّف الإعداد",
+      bodyAr:
+        "تحت Redirect URL الصق عنوان العودة الظاهر أدناه حرفياً واحفظ. انسخ Configuration ID (config_id) وضعه هنا أو في INSTAGRAM_CONFIG_ID.",
     },
     {
       titleAr: "أضف الحساب التجريبي",
       bodyAr:
-        "قبل مراجعة التطبيق لا يربط إلا من له دور في التطبيق. من App roles > Roles أضف حساب Instagram كـ Instagram Tester واقبل الدعوة من إعدادات Instagram > Apps and websites. الحساب يجب أن يكون احترافياً: أعمال أو صانع محتوى.",
+        "من Generate access tokens > Add account ادعُ حساب Instagram الاحترافي كـ Instagram Tester، واقبل الدعوة من Instagram على الويب: Settings > Website permissions > Apps and websites > Tester Invites.",
     },
     {
-      titleAr: "انسخ معرّف Instagram وسرّه",
+      titleAr: "المعرّف والسر",
       bodyAr:
-        "انسخ Instagram App ID و Instagram App Secret من Business login settings. معرّف تطبيق Facebook وسرّه لا يعملان هنا ويعيدان «Invalid platform app». رمز الدخول طويل الأمد يدوم ٦٠ يوماً ويُجدَّد تلقائياً عند فتح الصفحة.",
+        "مع Unified login استخدم معرّف تطبيق Meta وسرّه من App settings > Basic. الرمز الناتج System-user access token تابع لـ business portfolio، ومدته حسب إعدادك.",
     },
   ],
   scopes: [
     {
+      value: "instagram_basic",
+      descriptionAr: "Unified login: الاسم واسم المستخدم والصورة والمتابعون والمنشورات.",
+    },
+    {
+      value: "instagram_manage_insights",
+      descriptionAr: "Unified login: المشاهدات والوصول والتفاعل والحفظ والمشاركات والمتابعون الجدد.",
+    },
+    {
       value: "instagram_business_basic",
-      descriptionAr: "الاسم واسم المستخدم والصورة وعدد المتابعين والمنشورات وإحصاءات كل منشور العامة.",
+      descriptionAr: "الإعداد القديم Instagram login: بيانات الحساب والمنشورات.",
     },
     {
       value: "instagram_business_manage_insights",
-      descriptionAr: "إحصاءات الحساب والمنشورات: المشاهدات والوصول والحفظ والمشاركات والمتابعون الجدد.",
+      descriptionAr: "الإعداد القديم Instagram login: إحصاءات الحساب والمنشورات.",
     },
   ],
   callbackPath: INSTAGRAM_CALLBACK_PATH,
   pagePath: "/instagram",
   redirectPolicy: "instagram",
   redirectHelpAr:
-    "الصق هذا العنوان في OAuth redirect URIs داخل Business login settings. يجب أن يطابق ما يرسله التطبيق حرفياً. أي عنوان عام يجب أن يكون https.",
+    "الصق هذا العنوان في Redirect URL داخل API setup with Unified login (أو OAuth redirect URIs في الإعداد القديم). يجب أن يطابق حرفياً، وأي عنوان عام يجب أن يكون https.",
 };

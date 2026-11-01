@@ -22,6 +22,9 @@ export const CREDENTIAL_ENV: Record<string, Record<string, string>> = {
   instagram: {
     clientId: "INSTAGRAM_CLIENT_ID",
     clientSecret: "INSTAGRAM_CLIENT_SECRET",
+    configId: "INSTAGRAM_CONFIG_ID",
+    /** Optional: "instagram" opens instagram.com/oauth/authorize instead of the Facebook dialog. */
+    loginDialog: "INSTAGRAM_LOGIN_DIALOG",
     publicBaseUrl: "INSTAGRAM_PUBLIC_BASE_URL",
   },
 };

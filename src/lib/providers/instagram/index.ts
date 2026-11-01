@@ -12,7 +12,7 @@ import {
 import { instagramRedirectAllowed, prepareInstagramCredentials } from "@/lib/providers/instagram/redirect";
 import type { ProviderModule } from "@/lib/providers/types";
 
-/** Business Login for Instagram. Instagram has no token revoke endpoint, so disconnect clears the local token. */
+/** Instagram via Unified login (config_id) or Business Login for Instagram. Disconnect clears the local token. */
 export const instagramProvider: ProviderModule = {
   meta: instagramMeta,
   prepareCredentials: prepareInstagramCredentials,
@@ -23,7 +23,13 @@ export const instagramProvider: ProviderModule = {
     buildAuthorizationUrl({ credentials, redirectUri, state }) {
       const { clientId } = readInstagramClient(credentials);
       if (!instagramRedirectAllowed(redirectUri)) throw new OAuthError("redirect_uri_mismatch", redirectUri);
-      return buildInstagramAuthorizationUrl({ clientId, redirectUri, state });
+      return buildInstagramAuthorizationUrl({
+        clientId,
+        redirectUri,
+        state,
+        configId: credentials.configId,
+        loginDialog: credentials.loginDialog,
+      });
     },
     exchangeAuthorizationCode,
     refreshAccessToken,

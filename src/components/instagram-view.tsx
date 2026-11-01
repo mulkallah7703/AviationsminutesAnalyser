@@ -90,7 +90,7 @@ export function InstagramView({
         <Alert>
           <AlertTitle>تم الربط</AlertTitle>
           <AlertDescription className="leading-7">
-            حُفظ رمز الدخول طويل الأمد لهذا الحساب المحلي، ويُجدَّد تلقائياً قبل انتهاء الستين يوماً.
+            حُفظ رمز الدخول مشفّراً لهذا الحساب المحلي.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -102,8 +102,8 @@ export function InstagramView({
           <h2 className="text-xl font-semibold">الحساب غير مربوط</h2>
           <p className="max-w-2xl text-sm leading-7 text-muted-foreground">
             {enabled
-              ? "اضغط ربط للانتقال إلى تسجيل الدخول في Instagram والموافقة على قراءة الحساب وإحصاءاته. يعمل مع حسابات الأعمال وصنّاع المحتوى."
-              : "Instagram غير مفعّل. المسؤول يحفظ Instagram App ID و Instagram App Secret من إعدادات المسؤول."}
+              ? "اضغط ربط للانتقال إلى نافذة Meta: سجّل الدخول بـ Instagram أو Facebook، واختر الـ business portfolio وحساب Instagram، ثم وافق على الصلاحيات. يعمل مع حسابات الأعمال وصنّاع المحتوى."
+              : "Instagram غير مفعّل. المسؤول يحفظ معرّف تطبيق Meta وسرّه و Configuration ID من إعدادات المسؤول."}
           </p>
           <ConnectActions target={target} connected={false} enabled={enabled} signedIn={signedIn} variant="page" />
         </section>

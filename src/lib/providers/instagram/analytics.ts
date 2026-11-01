@@ -5,6 +5,7 @@ import {
   fetchMediaPage,
   graphGet,
   graphUrl,
+  type GraphContext,
   InstagramApiError,
   text,
   type InstagramMedia,
@@ -194,8 +195,8 @@ export function parseFollowBreakdown(rows: unknown): { gained: number; lost: num
 }
 
 export async function fetchAccountInsights(input: {
+  ctx: GraphContext;
   igUserId: string;
-  accessToken: string;
   range: PeriodRange;
   now: Date;
   fetchImpl?: typeof fetch;
@@ -219,7 +220,7 @@ export async function fetchAccountInsights(input: {
     if (active.length > 0) {
       try {
         const { body } = await graphGet(
-          graphUrl(path, { metric: active.join(","), period: "day", metric_type: "total_value", ...range }, input.accessToken),
+          graphUrl(input.ctx, path, { metric: active.join(","), period: "day", metric_type: "total_value", ...range }),
           fetchImpl,
         );
         addTotals(result, parseTotalValues(body.data, active));
@@ -234,7 +235,7 @@ export async function fetchAccountInsights(input: {
           for (const metric of active) {
             try {
               const { body } = await graphGet(
-                graphUrl(path, { metric, period: "day", metric_type: "total_value", ...range }, input.accessToken),
+                graphUrl(input.ctx, path, { metric, period: "day", metric_type: "total_value", ...range }),
                 fetchImpl,
               );
               addTotals(result, parseTotalValues(body.data, [metric]));
@@ -252,7 +253,7 @@ export async function fetchAccountInsights(input: {
     if (result.reachDaily) {
       try {
         const { body } = await graphGet(
-          graphUrl(path, { metric: "reach", period: "day", metric_type: "time_series", ...range }, input.accessToken),
+          graphUrl(input.ctx, path, { metric: "reach", period: "day", metric_type: "time_series", ...range }),
           fetchImpl,
         );
         result.reachDaily.push(...parseDailySeries(body.data, "reach"));
@@ -266,11 +267,13 @@ export async function fetchAccountInsights(input: {
     if (result.follows) {
       try {
         const { body } = await graphGet(
-          graphUrl(
-            path,
-            { metric: "follows_and_unfollows", period: "day", metric_type: "total_value", breakdown: "follow_type", ...range },
-            input.accessToken,
-          ),
+          graphUrl(input.ctx, path, {
+            metric: "follows_and_unfollows",
+            period: "day",
+            metric_type: "total_value",
+            breakdown: "follow_type",
+            ...range,
+          }),
           fetchImpl,
         );
         const follows = parseFollowBreakdown(body.data);
@@ -304,7 +307,7 @@ function addTotals(result: AccountInsightsFetch, values: Map<string, number>): v
 }
 
 export async function collectYearMedia(input: {
-  accessToken: string;
+  ctx: GraphContext;
   now: Date;
   fetchImpl?: typeof fetch;
 }): Promise<MediaFetch> {
@@ -315,7 +318,7 @@ export async function collectYearMedia(input: {
   let next: string | null = null;
   let incomplete = true;
   for (let page = 0; page < MEDIA_PAGE_CAP; page += 1) {
-    const result = await fetchMediaPage(input.accessToken, { next, limit: MEDIA_PAGE_SIZE, fetchImpl });
+    const result = await fetchMediaPage(input.ctx, { next, limit: MEDIA_PAGE_SIZE, fetchImpl });
     let oldest: string | null = null;
     for (const media of result.media) {
       if (seen.has(media.id)) continue;
@@ -335,7 +338,7 @@ export async function collectYearMedia(input: {
   const newest = [...posts].sort((a, b) => (b.timestamp ?? "").localeCompare(a.timestamp ?? "")).slice(0, MEDIA_INSIGHTS_CAP);
   for (const post of newest) {
     try {
-      post.insights = await fetchMediaInsights(post.id, input.accessToken, fetchImpl);
+      post.insights = await fetchMediaInsights(input.ctx, post.id, fetchImpl);
     } catch (error) {
       rethrowIfFatal(error);
       const issue = classifyInsightError(error);
@@ -438,7 +441,7 @@ function buildNotices(
     notices.push({
       code: "insights_permission",
       textAr:
-        "صلاحية instagram_business_manage_insights غير ممنوحة لهذا الربط، فالمشاهدات والوصول والحفظ والمشاركات غير متاحة. اقطع الربط ثم اربط مجدداً ووافق على الإحصاءات، وتأكد أن الصلاحية مفعّلة للتطبيق في Meta.",
+        "صلاحية الإحصاءات (instagram_manage_insights في Unified login، أو instagram_business_manage_insights في الإعداد القديم) غير ممنوحة لهذا الربط، فالمشاهدات والوصول والحفظ والمشاركات غير متاحة. اقطع الربط ثم اربط مجدداً ووافق على الإحصاءات، وتأكد أنها مضافة إلى إعداد config_id في Meta.",
     });
   }
   if (issues.has("not_professional")) {

@@ -1,5 +1,11 @@
 import { OAuthError } from "@/lib/auth/oauth-error";
-import { INSTAGRAM_SCOPE } from "@/lib/providers/instagram/config";
+import { fetchAssignedInstagramAccounts, InstagramApiError } from "@/lib/providers/instagram/api";
+import {
+  FACEBOOK_GRAPH_BASE,
+  INSTAGRAM_API_VERSION,
+  INSTAGRAM_SCOPE,
+  UNIFIED_TOKEN_TYPE,
+} from "@/lib/providers/instagram/config";
 import { instagramRedirectAllowed, resolveInstagramRedirectUri } from "@/lib/providers/instagram/redirect";
 import type { TokenSet } from "@/lib/providers/types";
 
@@ -9,6 +15,22 @@ export const INSTAGRAM_AUTHORIZE_URL = "https://www.instagram.com/oauth/authoriz
 export const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 export const INSTAGRAM_EXCHANGE_URL = "https://graph.instagram.com/access_token";
 export const INSTAGRAM_REFRESH_URL = "https://graph.instagram.com/refresh_access_token";
+
+/** Unified login: Facebook Login for Business dialog and code exchange (Meta app ID and secret). */
+export const FACEBOOK_DIALOG_URL = `https://www.facebook.com/${INSTAGRAM_API_VERSION}/dialog/oauth`;
+export const FACEBOOK_TOKEN_URL = `${FACEBOOK_GRAPH_BASE}/oauth/access_token`;
+export const FACEBOOK_DEBUG_TOKEN_URL = `${FACEBOOK_GRAPH_BASE}/debug_token`;
+
+/** A System-user token configured to never expire has no expires_in. Treat it as valid for 50 years. */
+const NEVER_EXPIRES_MS = 50 * 365 * 24 * 60 * 60 * 1000;
+
+export function isUnifiedSetup(credentials: Record<string, string>): boolean {
+  return Boolean(credentials.configId?.trim());
+}
+
+export function isUnifiedToken(tokens: Pick<TokenSet, "tokenType">): boolean {
+  return tokens.tokenType === UNIFIED_TOKEN_TYPE;
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -41,8 +63,23 @@ export function buildInstagramAuthorizationUrl(input: {
   redirectUri: string;
   state: string;
   scope?: string;
+  configId?: string;
+  loginDialog?: string;
 }): string {
   if (!instagramRedirectAllowed(input.redirectUri)) throw new OAuthError("redirect_uri_mismatch", input.redirectUri);
+  const configId = input.configId?.trim();
+  if (configId) {
+    // Unified login: config_id replaces scope. prompt=login always offers both Instagram and Facebook sign-in.
+    const base = input.loginDialog?.trim().toLowerCase() === "instagram" ? INSTAGRAM_AUTHORIZE_URL : FACEBOOK_DIALOG_URL;
+    const unified = new URL(base);
+    unified.searchParams.set("client_id", input.clientId);
+    unified.searchParams.set("config_id", configId);
+    unified.searchParams.set("redirect_uri", input.redirectUri);
+    unified.searchParams.set("response_type", "code");
+    unified.searchParams.set("state", input.state);
+    unified.searchParams.set("prompt", "login");
+    return unified.toString();
+  }
   const url = new URL(INSTAGRAM_AUTHORIZE_URL);
   url.searchParams.set("client_id", input.clientId);
   url.searchParams.set("redirect_uri", input.redirectUri);
@@ -54,7 +91,7 @@ export function buildInstagramAuthorizationUrl(input: {
 
 /** Instagram appends `#_` to the redirect. Browsers drop fragments, but strip it if it ever arrives. */
 export function cleanAuthorizationCode(code: string): string {
-  return code.trim().replace(/#_?$/, "");
+  return code.trim().replace(/#_?(=_)?$/, "");
 }
 
 type ShortLived = { accessToken: string; userId: string; permissions: string };
@@ -96,7 +133,10 @@ export function oauthErrorFrom(status: number, raw: string): OAuthError {
     code = "invalid_client";
   } else if (lower.includes("redirect")) {
     code = "redirect_uri_mismatch";
-  } else if (lower.includes("code") && (lower.includes("matching") || lower.includes("expired") || lower.includes("used"))) {
+  } else if (
+    lower.includes("verification code") ||
+    (lower.includes("code") && (lower.includes("matching") || lower.includes("expired") || lower.includes("used")))
+  ) {
     code = "invalid_grant";
   } else if (nested?.code === 190 || lower.includes("session has expired") || lower.includes("access token")) {
     code = "refresh_expired";
@@ -119,6 +159,9 @@ export async function exchangeAuthorizationCode(input: {
   const fetchImpl = input.fetchImpl ?? fetch;
   const now = input.now ?? Date.now();
   const { clientId, clientSecret } = readInstagramClient(input.credentials);
+  if (isUnifiedSetup(input.credentials)) {
+    return exchangeUnifiedCode({ clientId, clientSecret, redirectUri: input.redirectUri, code: input.code, fetchImpl, now });
+  }
   const body = new URLSearchParams({
     client_id: clientId,
     client_secret: clientSecret,
@@ -155,6 +198,8 @@ export async function refreshAccessToken(input: {
   const now = input.now ?? Date.now();
   if (!input.tokens.accessToken) throw new OAuthError("refresh_missing");
   if (input.tokens.expiresAt <= now) throw new OAuthError("refresh_expired");
+  // System-user tokens are not refreshed with ig_refresh_token. They last as the configuration says.
+  if (isUnifiedToken(input.tokens)) return input.tokens;
   const url = new URL(INSTAGRAM_REFRESH_URL);
   url.searchParams.set("grant_type", "ig_refresh_token");
   url.searchParams.set("access_token", input.tokens.accessToken);
@@ -195,7 +240,7 @@ export async function ensureFreshToken(input: {
 }): Promise<{ tokens: TokenSet; refreshed: boolean }> {
   const now = input.now ?? Date.now();
   if (input.tokens.expiresAt <= now) throw new OAuthError("refresh_expired");
-  if (input.tokens.expiresAt - now > REFRESH_WHEN_REMAINING_MS) {
+  if (isUnifiedToken(input.tokens) || input.tokens.expiresAt - now > REFRESH_WHEN_REMAINING_MS) {
     return { tokens: input.tokens, refreshed: false };
   }
   try {
@@ -203,6 +248,77 @@ export async function ensureFreshToken(input: {
     return { tokens, refreshed: true };
   } catch {
     return { tokens: input.tokens, refreshed: false };
+  }
+}
+
+/**
+ * Unified login: GET graph.facebook.com/oauth/access_token with the Meta app ID and secret, then read the
+ * shared Instagram account from /me/assigned_instagram_accounts. The token is a Business Integration
+ * System User access token.
+ */
+async function exchangeUnifiedCode(input: {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  code: string;
+  fetchImpl: typeof fetch;
+  now: number;
+}): Promise<TokenSet> {
+  const url = new URL(FACEBOOK_TOKEN_URL);
+  url.searchParams.set("client_id", input.clientId);
+  url.searchParams.set("client_secret", input.clientSecret);
+  url.searchParams.set("redirect_uri", input.redirectUri);
+  url.searchParams.set("code", cleanAuthorizationCode(input.code));
+  const response = await input.fetchImpl(url.toString());
+  const raw = await readText(response);
+  if (!response.ok) throw oauthErrorFrom(response.status, raw);
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = asObject(JSON.parse(raw));
+  } catch {
+    body = null;
+  }
+  const accessToken = typeof body?.access_token === "string" ? body.access_token : "";
+  if (!accessToken) throw new OAuthError("token_missing");
+  const expiresIn = typeof body?.expires_in === "number" && body.expires_in > 0 ? body.expires_in : null;
+  const ctx = { accessToken, unified: true, appSecret: input.clientSecret };
+
+  let accounts: { id: string; username: string }[];
+  try {
+    accounts = await fetchAssignedInstagramAccounts(ctx, input.fetchImpl);
+  } catch (error) {
+    if (error instanceof InstagramApiError && error.permissionMissing) throw new OAuthError("permission", error.message);
+    throw new OAuthError("token_http", error instanceof Error ? error.message : "");
+  }
+  const account = accounts[0];
+  if (!account) throw new OAuthError("no_instagram_account");
+
+  return {
+    accessToken,
+    refreshToken: null,
+    expiresAt: input.now + (expiresIn ? expiresIn * 1000 : NEVER_EXPIRES_MS),
+    scope: await grantedScopes(accessToken, input),
+    tokenType: UNIFIED_TOKEN_TYPE,
+    openId: account.id,
+  };
+}
+
+/** Best effort: the permissions on the token, from debug_token with the app access token. Empty when unknown. */
+async function grantedScopes(
+  accessToken: string,
+  input: { clientId: string; clientSecret: string; fetchImpl: typeof fetch },
+): Promise<string> {
+  try {
+    const url = new URL(FACEBOOK_DEBUG_TOKEN_URL);
+    url.searchParams.set("input_token", accessToken);
+    url.searchParams.set("access_token", `${input.clientId}|${input.clientSecret}`);
+    const response = await input.fetchImpl(url.toString());
+    if (!response.ok) return "";
+    const data = asObject(asObject(JSON.parse(await readText(response)))?.data);
+    const scopes = Array.isArray(data?.scopes) ? data.scopes.filter((item): item is string => typeof item === "string") : [];
+    return scopes.join(",");
+  } catch {
+    return "";
   }
 }
 

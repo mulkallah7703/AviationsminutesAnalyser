@@ -1,4 +1,25 @@
-import { INSTAGRAM_GRAPH_BASE } from "@/lib/providers/instagram/config";
+import { createHmac } from "node:crypto";
+import { FACEBOOK_GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from "@/lib/providers/instagram/config";
+
+/**
+ * Where and how to call the Graph API.
+ * Unified login: graph.facebook.com, the Instagram account id in the path, and appsecret_proof.
+ * Instagram login: graph.instagram.com and `/me`.
+ */
+export type GraphContext = {
+  accessToken: string;
+  unified: boolean;
+  igUserId?: string;
+  appSecret?: string;
+};
+
+export function graphBase(ctx: Pick<GraphContext, "unified">): string {
+  return ctx.unified ? FACEBOOK_GRAPH_BASE : INSTAGRAM_GRAPH_BASE;
+}
+
+export function appSecretProof(accessToken: string, appSecret: string): string {
+  return createHmac("sha256", appSecret).update(accessToken).digest("hex");
+}
 
 export class InstagramApiError extends Error {
   readonly status: number;
@@ -63,6 +84,18 @@ export type InstagramMediaInsights = {
   totalInteractions: number | null;
 };
 
+/** IG User node fields on graph.facebook.com. `user_id` and `account_type` exist only on graph.instagram.com. */
+const UNIFIED_PROFILE_FIELDS = [
+  "id",
+  "ig_id",
+  "username",
+  "name",
+  "profile_picture_url",
+  "followers_count",
+  "follows_count",
+  "media_count",
+].join(",");
+
 const PROFILE_FIELDS = [
   "id",
   "user_id",
@@ -90,11 +123,23 @@ const MEDIA_FIELDS = [
 
 export const MEDIA_INSIGHT_METRICS = ["views", "reach", "likes", "comments", "shares", "saved", "total_interactions"] as const;
 
-export function graphUrl(path: string, params: Record<string, string>, accessToken: string): string {
-  const url = new URL(`${INSTAGRAM_GRAPH_BASE}/${path.replace(/^\//, "")}`);
+export function graphUrl(ctx: GraphContext, path: string, params: Record<string, string>): string {
+  const url = new URL(`${graphBase(ctx)}/${path.replace(/^\//, "")}`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  url.searchParams.set("access_token", accessToken);
+  return signUrl(ctx, url);
+}
+
+function signUrl(ctx: GraphContext, url: URL): string {
+  url.searchParams.set("access_token", ctx.accessToken);
+  if (ctx.unified && ctx.appSecret) url.searchParams.set("appsecret_proof", appSecretProof(ctx.accessToken, ctx.appSecret));
   return url.toString();
+}
+
+/** Path segment for the connected account: the IG account id with Unified login, `me` with Instagram login. */
+export function accountPath(ctx: GraphContext): string {
+  if (!ctx.unified) return "me";
+  if (!ctx.igUserId) throw new InstagramApiError(400, 100, null, "OAuthException", "no_instagram_account");
+  return ctx.igUserId;
 }
 
 export async function graphGet(url: string, fetchImpl: typeof fetch): Promise<{ body: Record<string, unknown>; raw: string }> {
@@ -119,9 +164,23 @@ export async function graphGet(url: string, fetchImpl: typeof fetch): Promise<{ 
   return { body, raw };
 }
 
-export async function fetchInstagramAccount(accessToken: string, fetchImpl: typeof fetch = fetch): Promise<InstagramAccount> {
-  const { body, raw } = await graphGet(graphUrl("me", { fields: PROFILE_FIELDS }, accessToken), fetchImpl);
+export async function fetchInstagramAccount(ctx: GraphContext, fetchImpl: typeof fetch = fetch): Promise<InstagramAccount> {
+  const fields = ctx.unified ? UNIFIED_PROFILE_FIELDS : PROFILE_FIELDS;
+  const { body, raw } = await graphGet(graphUrl(ctx, accountPath(ctx), { fields }), fetchImpl);
   return parseAccount(body, raw);
+}
+
+/** Unified login: the Instagram accounts the client shared with the app. */
+export async function fetchAssignedInstagramAccounts(
+  ctx: GraphContext,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ id: string; username: string }[]> {
+  const { body } = await graphGet(graphUrl(ctx, "me/assigned_instagram_accounts", { fields: "id,username" }), fetchImpl);
+  const rows = Array.isArray(body.data) ? body.data : [];
+  return rows
+    .map((row) => asObject(row))
+    .filter((row): row is Record<string, unknown> => Boolean(row && text(row.id)))
+    .map((row) => ({ id: text(row.id), username: text(row.username) }));
 }
 
 export function parseAccount(body: Record<string, unknown>, raw = ""): InstagramAccount {
@@ -170,11 +229,22 @@ export function parseMediaList(rows: unknown): InstagramMedia[] {
 export type MediaPage = { media: InstagramMedia[]; next: string | null };
 
 export async function fetchMediaPage(
-  accessToken: string,
+  ctx: GraphContext,
   options: { next?: string | null; limit?: number; fetchImpl?: typeof fetch } = {},
 ): Promise<MediaPage> {
-  const url = options.next ?? graphUrl("me/media", { fields: MEDIA_FIELDS, limit: String(options.limit ?? 50) }, accessToken);
-  if (!url.startsWith("https://graph.instagram.com/")) return { media: [], next: null };
+  let url: string;
+  if (options.next) {
+    let next: URL;
+    try {
+      next = new URL(options.next);
+    } catch {
+      return { media: [], next: null };
+    }
+    if (next.origin !== new URL(graphBase(ctx)).origin) return { media: [], next: null };
+    url = signUrl(ctx, next);
+  } else {
+    url = graphUrl(ctx, `${accountPath(ctx)}/media`, { fields: MEDIA_FIELDS, limit: String(options.limit ?? 50) });
+  }
   const { body } = await graphGet(url, options.fetchImpl ?? fetch);
   const paging = asObject(body.paging);
   const next = text(paging?.next);
@@ -182,14 +252,11 @@ export async function fetchMediaPage(
 }
 
 export async function fetchMediaInsights(
+  ctx: GraphContext,
   mediaId: string,
-  accessToken: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<InstagramMediaInsights> {
-  const { body } = await graphGet(
-    graphUrl(`${mediaId}/insights`, { metric: MEDIA_INSIGHT_METRICS.join(",") }, accessToken),
-    fetchImpl,
-  );
+  const { body } = await graphGet(graphUrl(ctx, `${mediaId}/insights`, { metric: MEDIA_INSIGHT_METRICS.join(",") }), fetchImpl);
   const values = parseMetricValues(body.data);
   return {
     views: values.get("views") ?? null,

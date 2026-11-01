@@ -1,7 +1,7 @@
 import { readCredentials, readTokens, saveTokens } from "@/lib/store";
 import type { TokenSet, UserFacingError } from "@/lib/providers/types";
 import { periodRange, type AnalyticsPeriod } from "@/lib/providers/youtube/analytics";
-import { fetchInstagramAccount, InstagramApiError, type InstagramAccount } from "@/lib/providers/instagram/api";
+import { fetchInstagramAccount, InstagramApiError, type GraphContext, type InstagramAccount } from "@/lib/providers/instagram/api";
 import {
   buildInstagramPeriodSummary,
   classifyInsightError,
@@ -19,11 +19,14 @@ import {
   recordInstagramFollowers,
   writeInstagramCache,
 } from "@/lib/providers/instagram/cache";
-import { INSTAGRAM_INSIGHTS_SCOPE } from "@/lib/providers/instagram/config";
+import { INSTAGRAM_INSIGHTS_SCOPE, UNIFIED_INSIGHTS_SCOPE } from "@/lib/providers/instagram/config";
 import { explainInstagramError } from "@/lib/providers/instagram/errors";
-import { ensureFreshToken, OAuthError } from "@/lib/providers/instagram/oauth";
+import { ensureFreshToken, isUnifiedToken, OAuthError } from "@/lib/providers/instagram/oauth";
 
-async function freshTokens(options: { userId: string; fetchImpl: typeof fetch; now: number }): Promise<TokenSet> {
+async function freshContext(options: { userId: string; fetchImpl: typeof fetch; now: number }): Promise<{
+  tokens: TokenSet;
+  ctx: GraphContext;
+}> {
   const credentials = readCredentials("instagram");
   if (!credentials?.clientId || !credentials.clientSecret) throw new OAuthError("needs_credentials");
   const stored = readTokens(options.userId, "instagram");
@@ -35,11 +38,22 @@ async function freshTokens(options: { userId: string; fetchImpl: typeof fetch; n
     now: options.now,
   });
   if (fresh.refreshed) saveTokens(options.userId, "instagram", fresh.tokens);
-  return fresh.tokens;
+  const unified = isUnifiedToken(fresh.tokens);
+  if (unified && !fresh.tokens.openId) throw new OAuthError("no_instagram_account");
+  return {
+    tokens: fresh.tokens,
+    ctx: {
+      accessToken: fresh.tokens.accessToken,
+      unified,
+      igUserId: fresh.tokens.openId,
+      appSecret: unified ? credentials.clientSecret : undefined,
+    },
+  };
 }
 
 export function hasInsightsScope(scope: string | null | undefined): boolean {
-  return (scope ?? "").split(/[\s,]+/).includes(INSTAGRAM_INSIGHTS_SCOPE);
+  const granted = (scope ?? "").split(/[\s,]+/);
+  return granted.includes(INSTAGRAM_INSIGHTS_SCOPE) || granted.includes(UNIFIED_INSIGHTS_SCOPE);
 }
 
 export async function loadInstagramAccount(options: {
@@ -49,9 +63,9 @@ export async function loadInstagramAccount(options: {
 }): Promise<InstagramAccount> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now();
-  const tokens = await freshTokens({ userId: options.userId, fetchImpl, now });
+  const { ctx } = await freshContext({ userId: options.userId, fetchImpl, now });
   try {
-    return await fetchInstagramAccount(tokens.accessToken, fetchImpl);
+    return await fetchInstagramAccount(ctx, fetchImpl);
   } catch (error) {
     if (error instanceof InstagramApiError && error.tokenInvalid) throw new OAuthError("token_invalid", error.message);
     throw error;
@@ -72,13 +86,13 @@ export async function loadInstagramPeriodSummary(options: {
     if (typeof options.account.followersCount === "number") {
       recordInstagramFollowers(options.userId, igUserId, utcDay(now), options.account.followersCount);
     }
-    const tokens = await freshTokens({ userId: options.userId, fetchImpl, now: now.getTime() });
+    const { tokens, ctx } = await freshContext({ userId: options.userId, fetchImpl, now: now.getTime() });
     const scopeKnown = Boolean(tokens.scope);
     const insightsGranted = !scopeKnown || hasInsightsScope(tokens.scope);
 
     let media = readInstagramCache<MediaFetch>(options.userId, igUserId, "media", now.getTime());
     if (!media) {
-      media = await collectYearMedia({ accessToken: tokens.accessToken, now, fetchImpl });
+      media = await collectYearMedia({ ctx, now, fetchImpl });
       writeInstagramCache(options.userId, igUserId, "media", media, now.getTime());
     }
 
@@ -90,8 +104,8 @@ export async function loadInstagramPeriodSummary(options: {
       if (!account) {
         try {
           account = await fetchAccountInsights({
+            ctx,
             igUserId,
-            accessToken: tokens.accessToken,
             range: periodRange(options.period, now),
             now,
             fetchImpl,

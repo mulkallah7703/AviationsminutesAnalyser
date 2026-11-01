@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { beginOAuth, completeOAuthCallback } from "@/lib/auth/service";
 import { readTokens, upsertCredentials } from "@/lib/store";
 import { periodRange } from "@/lib/providers/youtube/analytics";
-import { fetchInstagramAccount, InstagramApiError } from "@/lib/providers/instagram/api";
+import { appSecretProof, fetchInstagramAccount, fetchMediaPage, InstagramApiError } from "@/lib/providers/instagram/api";
 import {
   buildInstagramPeriodSummary,
   classifyInsightError,
@@ -12,7 +12,7 @@ import {
   parseFollowBreakdown,
   parseTotalValues,
 } from "@/lib/providers/instagram/analytics";
-import { instagramMeta } from "@/lib/providers/instagram/config";
+import { instagramMeta, UNIFIED_TOKEN_TYPE } from "@/lib/providers/instagram/config";
 import { explainInstagramCode } from "@/lib/providers/instagram/errors";
 import {
   cleanAuthorizationCode,
@@ -22,11 +22,19 @@ import {
   parseShortLivedToken,
 } from "@/lib/providers/instagram/oauth";
 import { prepareInstagramCredentials, previewInstagramRedirect, resolveInstagramRedirectUri } from "@/lib/providers/instagram/redirect";
+import { hasInsightsScope } from "@/lib/providers/instagram/session";
 import { useTempDataDir } from "@/test/temp-data";
 
 const APP_ID = "1234567890123456";
 const SECRET = "instagram-app-secret";
-const ENV_KEYS = ["INSTAGRAM_CLIENT_ID", "INSTAGRAM_CLIENT_SECRET", "INSTAGRAM_PUBLIC_BASE_URL", "PUBLIC_BASE_URL"];
+const ENV_KEYS = [
+  "INSTAGRAM_CLIENT_ID",
+  "INSTAGRAM_CLIENT_SECRET",
+  "INSTAGRAM_CONFIG_ID",
+  "INSTAGRAM_LOGIN_DIALOG",
+  "INSTAGRAM_PUBLIC_BASE_URL",
+  "PUBLIC_BASE_URL",
+];
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -199,7 +207,7 @@ describe("Instagram parsing", () => {
   });
 
   it("reads profile ids from raw text", async () => {
-    const account = await fetchInstagramAccount("token", async () =>
+    const account = await fetchInstagramAccount({ accessToken: "token", unified: false }, async () =>
       jsonResponse(
         '{"id":"26000000000000001","user_id":17841477653344396,"username":"mulkallah77","name":"M","account_type":"MEDIA_CREATOR","followers_count":42,"follows_count":3,"media_count":7}',
       ),
@@ -280,8 +288,8 @@ describe("Instagram parsing", () => {
       return jsonResponse({ data: [{ name: metric, period: "day", total_value: { value: 2 } }] });
     };
     const account = await fetchAccountInsights({
+      ctx: { accessToken: "token", unified: false },
       igUserId: "17841477653344396",
-      accessToken: "token",
       range: periodRange("month", now),
       now,
       fetchImpl,
@@ -303,5 +311,157 @@ describe("Instagram parsing", () => {
     expect(summary.notices.map((notice) => notice.code)).toEqual(
       expect.arrayContaining(["metric_unavailable", "follows_unavailable"]),
     );
+  });
+});
+
+const CONFIG_ID = "987654321098765";
+
+describe("Instagram Unified login", () => {
+  useTempDataDir();
+
+  it("opens the Facebook Login for Business dialog with config_id instead of scope", () => {
+    saveInstagram({ configId: CONFIG_ID });
+    process.env.INSTAGRAM_PUBLIC_BASE_URL = "https://aviationsminuteanalysis.com";
+    const started = beginOAuth("instagram", "http://localhost:5050", "user-a");
+    if (started.type !== "redirect") throw new Error(JSON.stringify(started));
+    const url = new URL(started.url);
+    expect(`${url.origin}${url.pathname}`).toBe("https://www.facebook.com/v26.0/dialog/oauth");
+    expect(url.searchParams.get("client_id")).toBe(APP_ID);
+    expect(url.searchParams.get("config_id")).toBe(CONFIG_ID);
+    expect(url.searchParams.get("redirect_uri")).toBe("https://aviationsminuteanalysis.com/api/auth/instagram/callback");
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("prompt")).toBe("login");
+    expect(url.searchParams.get("scope")).toBeNull();
+    expect(url.searchParams.get("state")).toBeTruthy();
+    expect(started.url).not.toContain(SECRET);
+  });
+
+  it("reads config_id from INSTAGRAM_CONFIG_ID and can use the Instagram dialog", () => {
+    saveInstagram();
+    process.env.INSTAGRAM_CONFIG_ID = CONFIG_ID;
+    process.env.INSTAGRAM_LOGIN_DIALOG = "instagram";
+    const started = beginOAuth("instagram", "http://localhost:5050", "user-a");
+    if (started.type !== "redirect") throw new Error(JSON.stringify(started));
+    const url = new URL(started.url);
+    expect(`${url.origin}${url.pathname}`).toBe("https://www.instagram.com/oauth/authorize");
+    expect(url.searchParams.get("config_id")).toBe(CONFIG_ID);
+  });
+
+  it("exchanges the code at graph.facebook.com and stores the shared Instagram account", async () => {
+    saveInstagram({ configId: CONFIG_ID });
+    const started = beginOAuth("instagram", "http://localhost:5050", "user-a");
+    if (started.type !== "redirect") throw new Error("expected redirect");
+    const urls: URL[] = [];
+    await completeOAuthCallback({
+      platform: "instagram",
+      code: "fb-code#_=_",
+      state: new URL(started.url).searchParams.get("state"),
+      fetchImpl: async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        urls.push(url);
+        if (url.pathname === "/v26.0/oauth/access_token") return jsonResponse({ access_token: "suat", token_type: "bearer" });
+        if (url.pathname === "/v26.0/me/assigned_instagram_accounts") {
+          return jsonResponse({ data: [{ id: "17841477653344396", username: "mulkallah77" }] });
+        }
+        if (url.pathname === "/v26.0/debug_token") {
+          return jsonResponse({ data: { scopes: ["instagram_basic", "instagram_manage_insights"] } });
+        }
+        return jsonResponse({ error: { message: "unexpected" } }, 500);
+      },
+    });
+    const exchange = urls[0]!;
+    expect(exchange.origin).toBe("https://graph.facebook.com");
+    expect(exchange.searchParams.get("client_id")).toBe(APP_ID);
+    expect(exchange.searchParams.get("client_secret")).toBe(SECRET);
+    expect(exchange.searchParams.get("code")).toBe("fb-code");
+    expect(exchange.searchParams.get("redirect_uri")).toBe("http://localhost:5050/api/auth/instagram/callback");
+    expect(urls[1]!.searchParams.get("appsecret_proof")).toBe(appSecretProof("suat", SECRET));
+    const tokens = readTokens("user-a", "instagram");
+    expect(tokens?.accessToken).toBe("suat");
+    expect(tokens?.tokenType).toBe(UNIFIED_TOKEN_TYPE);
+    expect(tokens?.openId).toBe("17841477653344396");
+    expect(hasInsightsScope(tokens?.scope)).toBe(true);
+    expect(tokens!.expiresAt).toBeGreaterThan(Date.now() + 10 * 365 * 86_400_000);
+  });
+
+  it("fails clearly when no Instagram account was shared", async () => {
+    saveInstagram({ configId: CONFIG_ID });
+    const started = beginOAuth("instagram", "http://localhost:5050", "user-a");
+    if (started.type !== "redirect") throw new Error("expected redirect");
+    const result = await completeOAuthCallback({
+      platform: "instagram",
+      code: "fb-code",
+      state: new URL(started.url).searchParams.get("state"),
+      fetchImpl: async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/oauth/access_token")) return jsonResponse({ access_token: "suat" });
+        return jsonResponse({ data: [] });
+      },
+    }).catch((error: unknown) => error);
+    expect(JSON.stringify(result)).toContain("no_instagram_account");
+    expect(readTokens("user-a", "instagram")).toBeNull();
+  });
+
+  it("does not try ig_refresh_token on a system-user token", async () => {
+    const tokens = {
+      accessToken: "suat",
+      refreshToken: null,
+      expiresAt: Date.now() + 86_400_000,
+      scope: "",
+      tokenType: UNIFIED_TOKEN_TYPE,
+      openId: "17841477653344396",
+    };
+    const result = await ensureFreshToken({
+      credentials: {},
+      tokens,
+      fetchImpl: async () => {
+        throw new Error("should not refresh");
+      },
+    });
+    expect(result.refreshed).toBe(false);
+  });
+
+  it("calls graph.facebook.com with the account id and keeps paging on that host", async () => {
+    const ctx = { accessToken: "suat", unified: true, igUserId: "17841477653344396", appSecret: SECRET };
+    const seen: URL[] = [];
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      seen.push(url);
+      if (url.pathname.endsWith("/media")) {
+        return jsonResponse({
+          data: [{ id: "m1", media_type: "IMAGE", timestamp: "2026-10-20T10:00:00+0000", like_count: 3 }],
+          paging: { next: "https://graph.facebook.com/v26.0/17841477653344396/media?after=abc&access_token=old" },
+        });
+      }
+      return jsonResponse({ id: "17841477653344396", ig_id: 123, username: "mulkallah77", followers_count: 42 });
+    };
+    const account = await fetchInstagramAccount(ctx, fetchImpl);
+    expect(seen[0]!.pathname).toBe("/v26.0/17841477653344396");
+    expect(seen[0]!.searchParams.get("fields")).not.toContain("account_type");
+    expect(account.userId).toBe("17841477653344396");
+    expect(account.followersCount).toBe(42);
+    const page = await fetchMediaPage(ctx, { fetchImpl });
+    expect(seen[1]!.pathname).toBe("/v26.0/17841477653344396/media");
+    expect(page.media).toHaveLength(1);
+    await fetchMediaPage(ctx, { next: page.next, fetchImpl });
+    expect(seen[2]!.searchParams.get("access_token")).toBe("suat");
+    expect(seen[2]!.searchParams.get("appsecret_proof")).toBe(appSecretProof("suat", SECRET));
+    const foreign = await fetchMediaPage(ctx, { next: "https://evil.example/x", fetchImpl });
+    expect(foreign.media).toHaveLength(0);
+  });
+
+  it("maps the Facebook code error to invalid_grant", () => {
+    expect(oauthErrorFrom(400, '{"error":{"message":"Invalid verification code format.","type":"OAuthException","code":100}}').code).toBe(
+      "invalid_grant",
+    );
+    expect(oauthErrorFrom(400, '{"error":{"message":"Error validating client secret.","type":"OAuthException","code":1}}').code).toBe(
+      "invalid_client",
+    );
+  });
+
+  it("validates the configuration id", () => {
+    expect(prepareInstagramCredentials({ clientId: APP_ID, clientSecret: SECRET, configId: "abc" }).ok).toBe(false);
+    const ok = prepareInstagramCredentials({ clientId: APP_ID, clientSecret: SECRET, configId: ` ${CONFIG_ID} ` });
+    expect(ok.ok && ok.fields.configId).toBe(CONFIG_ID);
   });
 });
