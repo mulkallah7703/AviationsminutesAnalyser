@@ -46,8 +46,8 @@ export type ProviderMeta = {
   callbackPath: string;
   pagePath: string;
   redirectHelpAr?: string;
-  /** HTTPS, or http only on localhost. TikTok, X, and LinkedIn use this rule. */
-  redirectPolicy?: "tiktok" | "x" | "linkedin";
+  /** HTTPS, or http only on localhost. TikTok, X, LinkedIn, and Instagram use this rule. */
+  redirectPolicy?: "tiktok" | "x" | "linkedin" | "instagram";
 };
 
 export type TokenSet = {

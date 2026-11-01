@@ -14,6 +14,7 @@ export function allowedDevOriginsFromEnv(env: Record<string, string | undefined>
   add(env.X_PUBLIC_BASE_URL);
   add(env.X_REDIRECT_URI);
   add(env.LINKEDIN_PUBLIC_BASE_URL);
+  add(env.INSTAGRAM_PUBLIC_BASE_URL);
   add(env.PUBLIC_BASE_URL);
   for (const part of (env.ALLOWED_DEV_ORIGINS ?? "").split(",")) add(part);
   return hosts;

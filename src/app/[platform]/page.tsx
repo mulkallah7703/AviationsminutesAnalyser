@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { AppShell } from "@/components/app-shell";
 import { ComingSoon } from "@/components/coming-soon";
+import { InstagramScreen } from "@/components/instagram-screen";
 import { LinkedInScreen } from "@/components/linkedin-screen";
 import { TikTokScreen } from "@/components/tiktok-screen";
 import { XScreen } from "@/components/x-screen";
@@ -45,6 +46,10 @@ export default async function PlatformPage({
       ) : platform === "x" ? (
         <Suspense fallback={<PlatformFallback />}>
           <XScreen searchParams={searchParams} />
+        </Suspense>
+      ) : platform === "instagram" ? (
+        <Suspense fallback={<PlatformFallback />}>
+          <InstagramScreen searchParams={searchParams} />
         </Suspense>
       ) : platform === "linkedin" ? (
         <Suspense fallback={<PlatformFallback />}>

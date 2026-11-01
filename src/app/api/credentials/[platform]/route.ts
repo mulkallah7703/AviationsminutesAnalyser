@@ -5,6 +5,7 @@ import { getProviderModule } from "@/lib/providers/registry";
 import { StorageError } from "@/lib/crypto/seal";
 import { explainYouTubeError } from "@/lib/providers/youtube/errors";
 import { youtubeRedirectUri } from "@/lib/providers/youtube/config";
+import { resolveInstagramRedirectUri } from "@/lib/providers/instagram/redirect";
 import { resolveLinkedInRedirectUri } from "@/lib/providers/linkedin/redirect";
 import { resolveXRedirectUri } from "@/lib/providers/x/redirect";
 import { describeCredentials, readCredentials, upsertCredentials } from "@/lib/store";
@@ -53,6 +54,15 @@ export async function GET(request: Request, context: Context) {
         ...status,
         redirectUri: resolveLinkedInRedirectUri({ credentials, origin }),
         sharedPublicBase: process.env.PUBLIC_BASE_URL?.trim() || null,
+      });
+    }
+    if (platform === "instagram") {
+      const origin = resolvePublicOrigin(request);
+      const credentials = readCredentials("instagram") ?? {};
+      return NextResponse.json({
+        ...status,
+        redirectUri: resolveInstagramRedirectUri({ credentials, origin }),
+        sharedPublicBase: process.env.INSTAGRAM_PUBLIC_BASE_URL?.trim() || process.env.PUBLIC_BASE_URL?.trim() || null,
       });
     }
     return NextResponse.json(status);

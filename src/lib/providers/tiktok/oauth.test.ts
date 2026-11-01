@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { beginOAuth, completeOAuthCallback } from "@/lib/auth/service";
 import { codeChallenge, createCodeVerifier } from "@/lib/providers/tiktok/oauth";
 import { fetchTikTokAccount } from "@/lib/providers/tiktok/api";
@@ -65,6 +65,12 @@ describe("TikTok redirect and PKCE", () => {
 
 describe("TikTok OAuth", () => {
   useTempDataDir();
+
+  beforeEach(() => {
+    delete process.env.TIKTOK_CLIENT_KEY;
+    delete process.env.TIKTOK_CLIENT_SECRET;
+    delete process.env.TIKTOK_PUBLIC_BASE_URL;
+  });
 
   afterEach(() => {
     delete process.env.TIKTOK_CLIENT_KEY;

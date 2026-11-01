@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { CredentialStatus } from "@/lib/credential-status";
+import { previewInstagramRedirect } from "@/lib/providers/instagram/redirect";
 import { previewLinkedInRedirect } from "@/lib/providers/linkedin/redirect";
 import { previewTikTokRedirect } from "@/lib/providers/tiktok/redirect";
 import { previewXRedirect } from "@/lib/providers/x/redirect";
@@ -96,11 +97,20 @@ export function CredentialsDialog({
     meta.redirectPolicy === "linkedin"
       ? previewLinkedInRedirect({ origin, publicBaseUrl, sharedPublicBase, callbackPath: meta.callbackPath })
       : null;
+  const instagramPreview =
+    meta.redirectPolicy === "instagram"
+      ? previewInstagramRedirect({ origin, publicBaseUrl, sharedPublicBase, callbackPath: meta.callbackPath })
+      : null;
   const redirectUri =
     meta.id === "youtube" || redirectLocked
       ? announcedRedirect || (meta.id === "youtube" ? DEFAULT_GOOGLE_REDIRECT_URI : "")
-      : xPreview?.uri || tiktokPreview?.uri || linkedinPreview?.uri || (origin ? `${origin}${meta.callbackPath}` : "");
-  const redirectError = xPreview?.error ?? tiktokPreview?.error ?? linkedinPreview?.error ?? null;
+      : xPreview?.uri ||
+        tiktokPreview?.uri ||
+        linkedinPreview?.uri ||
+        instagramPreview?.uri ||
+        (origin ? `${origin}${meta.callbackPath}` : "");
+  const redirectError =
+    xPreview?.error ?? tiktokPreview?.error ?? linkedinPreview?.error ?? instagramPreview?.error ?? null;
 
   const clientIdValue = values.clientId?.trim() ?? "";
   const showClientFormatHint =

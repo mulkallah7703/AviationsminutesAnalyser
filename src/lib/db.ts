@@ -72,6 +72,21 @@ CREATE TABLE IF NOT EXISTS x_follower_snapshots (
   followers INTEGER NOT NULL,
   PRIMARY KEY (user_id, x_user_id, day)
 );
+CREATE TABLE IF NOT EXISTS instagram_cache (
+  user_id TEXT NOT NULL,
+  ig_user_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, ig_user_id, kind)
+);
+CREATE TABLE IF NOT EXISTS instagram_follower_snapshots (
+  user_id TEXT NOT NULL,
+  ig_user_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  followers INTEGER NOT NULL,
+  PRIMARY KEY (user_id, ig_user_id, day)
+);
 `;
 
 export function getDb(): DatabaseSync {

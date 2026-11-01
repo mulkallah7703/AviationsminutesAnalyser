@@ -24,7 +24,7 @@ export function Dashboard({
       <section className="max-w-3xl space-y-3">
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">حساباتك في مكان واحد</h1>
         <p className="text-base leading-8 text-muted-foreground">
-          ادخل باسمك المحلي ثم اربط المنصة. الزر ينقلك مباشرة إلى صفحة موافقة YouTube أو TikTok أو X أو LinkedIn. مفاتيح
+          ادخل باسمك المحلي ثم اربط المنصة. الزر ينقلك مباشرة إلى صفحة موافقة YouTube أو TikTok أو X أو Instagram أو LinkedIn. مفاتيح
           التطبيق يضبطها المسؤول، ولا تظهر هنا.
         </p>
       </section>

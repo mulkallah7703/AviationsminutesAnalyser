@@ -1,21 +1,31 @@
+import { OAuthError } from "@/lib/auth/oauth-error";
+import { instagramMeta } from "@/lib/providers/instagram/config";
+import { explainInstagramError } from "@/lib/providers/instagram/errors";
+import {
+  buildInstagramAuthorizationUrl,
+  exchangeAuthorizationCode,
+  readInstagramClient,
+  refreshAccessToken,
+  resolveInstagramRedirect,
+  usesPkce,
+} from "@/lib/providers/instagram/oauth";
+import { instagramRedirectAllowed, prepareInstagramCredentials } from "@/lib/providers/instagram/redirect";
 import type { ProviderModule } from "@/lib/providers/types";
 
-/**
- * Follows X. Add the Instagram/Facebook Login provider module here.
- */
+/** Business Login for Instagram. Instagram has no token revoke endpoint, so disconnect clears the local token. */
 export const instagramProvider: ProviderModule = {
-  meta: {
-    id: "instagram",
-    name: "Instagram",
-    summaryAr: "الربط يُضاف بعد X.",
-    availability: "coming_soon",
-    comingSoonNoteAr: "يأتي Instagram بعد X.",
-    accent: "#c13584",
-    credentialFields: [],
-    setupSteps: [],
-    scopes: [],
-    extraLinks: [],
-    callbackPath: "/api/auth/instagram/callback",
-    pagePath: "/instagram",
+  meta: instagramMeta,
+  prepareCredentials: prepareInstagramCredentials,
+  explainError: explainInstagramError,
+  oauth: {
+    resolveRedirectUri: resolveInstagramRedirect,
+    usesPkce,
+    buildAuthorizationUrl({ credentials, redirectUri, state }) {
+      const { clientId } = readInstagramClient(credentials);
+      if (!instagramRedirectAllowed(redirectUri)) throw new OAuthError("redirect_uri_mismatch", redirectUri);
+      return buildInstagramAuthorizationUrl({ clientId, redirectUri, state });
+    },
+    exchangeAuthorizationCode,
+    refreshAccessToken,
   },
 };

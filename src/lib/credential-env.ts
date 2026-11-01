@@ -19,6 +19,11 @@ export const CREDENTIAL_ENV: Record<string, Record<string, string>> = {
     clientSecret: "LINKEDIN_CLIENT_SECRET",
     publicBaseUrl: "LINKEDIN_PUBLIC_BASE_URL",
   },
+  instagram: {
+    clientId: "INSTAGRAM_CLIENT_ID",
+    clientSecret: "INSTAGRAM_CLIENT_SECRET",
+    publicBaseUrl: "INSTAGRAM_PUBLIC_BASE_URL",
+  },
 };
 
 export function envVarName(platform: string, key: string): string | null {
